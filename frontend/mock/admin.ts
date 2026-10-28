@@ -71,6 +71,7 @@ const noCounts: Run['counts'] = {
   commentsRead: 0,
   subscribed: 0,
   downloadFailed: 0,
+  purged: 0,
 }
 
 function makeRun(task: RunTask, overrides: Partial<Run>, now: number): Run {
@@ -394,6 +395,17 @@ function page<T>(items: T[]) {
   return { items, nextCursor: null, total: items.length }
 }
 
+/** Deletes a channel's videos from the mock library (2.2.1): those named (ids by commas), or every one. */
+function purge(db: MockDb, channelId: string | null, videos: string | null): number {
+  const named = videos?.split(',') ?? null
+  const kept = db.videos.filter(
+    (video) => video.channelId !== channelId || (named !== null && !named.includes(video.id)),
+  )
+  const purged = db.videos.length - kept.length
+  db.videos.splice(0, db.videos.length, ...kept)
+  return purged
+}
+
 /**
  * Answers /api/auth/* and /api/admin/*; null for any other path (the public handler's). Logged out, the admin
  * endpoints answer 401 as the backend's.
@@ -454,12 +466,15 @@ export function handleAdmin(
 
   if (resource === 'tasks' && id === undefined) return { status: 200, body: tasks(state, now) }
   if (resource === 'tasks' && sub === 'runs' && method === 'POST') {
+    // A purge (2.2.1): the channel's videos named, or all of them, leave the mock library.
+    const purged = id === 'purgeVideos' ? purge(db, params.get('target'), params.get('videos')) : 0
     const run = makeRun(
       id as RunTask,
       {
         state: 'succeeded',
         target: params.get('target'),
-        counts: { ...noCounts, created: id === 'downloadVideo' ? 1 : 0 },
+        counts: { ...noCounts, created: id === 'downloadVideo' ? 1 : 0, purged },
+        notes: id === 'purgeVideos' ? [`${purged} videos purged.`] : [],
       },
       now,
     )

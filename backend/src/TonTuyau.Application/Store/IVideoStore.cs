@@ -46,6 +46,13 @@ public interface IVideoStore
     /// </returns>
     Task<IReadOnlyList<VideoFileState>> ListFilesAsync(CancellationToken cancellationToken);
 
+    /// <summary>
+    /// Deletes these videos (2.2.1, a purge): their comments, state on YouTube and keyframes go with them. Unknown ids
+    /// are ignored.
+    /// </summary>
+    /// <returns>How many were deleted.</returns>
+    Task<int> DeleteAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken);
+
     /// <summary>Sets or clears the "file missing on the share" flag. Unknown ids are ignored.</summary>
     Task SetMediaMissingAsync(IReadOnlyCollection<string> ids, bool missing, CancellationToken cancellationToken);
 

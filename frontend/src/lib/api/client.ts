@@ -251,10 +251,18 @@ export const api = {
    * Asks for a task (2.0: queued, started at once when nothing else goes on): the run. A refresh (1.5) takes its
    * `target`, a video's or channel's id; "Add a channel" (2.0) its id or @handle, and the tabs to subscribe to;
    * "Refresh everything" (2.0) the days within which what was read is skipped; a download (2.2) yt-dlp's format this
-   * once. 409 when the target isn't one of the library (a refresh), or is already (a download, a channel subscribed
-   * to).
+   * once; "Download everything" of a channel (2.2.1) the format and the retry without the cookie this once; a purge
+   * (2.2.1) the channel's videos to purge, all of them without. 409 when the target isn't one of the library (a
+   * refresh, a purge), or is already (a download, a channel subscribed to).
    */
-  startTask(task: RunTask, target?: string, tabs?: ChannelTabs, days?: number, format?: string): Promise<Run> {
+  startTask(
+    task: RunTask,
+    target?: string,
+    tabs?: ChannelTabs,
+    days?: number,
+    format?: string,
+    options: { retryWithoutCookie?: boolean; videos?: string[] } = {},
+  ): Promise<Run> {
     const query = new URLSearchParams()
     if (target !== undefined) {
       query.set('target', target)
@@ -267,6 +275,12 @@ export const api = {
     }
     if (format !== undefined) {
       query.set('format', format)
+    }
+    if (options.retryWithoutCookie !== undefined) {
+      query.set('retryWithoutCookie', String(options.retryWithoutCookie))
+    }
+    if (options.videos !== undefined) {
+      query.set('videos', options.videos.join(','))
     }
     const search = query.size > 0 ? `?${query.toString()}` : ''
     return postFor(`/api/admin/tasks/${segment(task)}/runs${search}`)

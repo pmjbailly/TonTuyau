@@ -393,6 +393,7 @@ export const fr: Dictionary = {
   'task.youTubeFullSync': 'Synchronisation YouTube complète',
   'task.retryDownloads': 'Réessayer les téléchargements échoués',
   'task.refreshAll': 'Tout actualiser',
+  'task.purgeVideos': 'Purger des vidéos',
   'task.import.what': 'Ajoute les nouveautés de la bibliothèque de TubeArchivist.',
   'task.import.help':
     "Lit toute la bibliothèque de TubeArchivist et ajoute ce que TonTuyau n'a pas. Ce qu'il a reste tel quel, et rien n'est supprimé : une fois importé, TubeArchivist peut être arrêté.",
@@ -410,6 +411,7 @@ export const fr: Dictionary = {
   'task.refreshAll.what': 'Relit chaque chaîne et ses vidéos sur YouTube.',
   'task.refreshAll.help':
     "Lit chaque chaîne puis ses vidéos sur YouTube, les moins récemment lues d'abord, au rythme des actualisations : ce que TonTuyau a lu récemment est sauté, ce qui a disparu n'est jamais relu.",
+  'task.purgeVideos.what': "Supprime des vidéos d'une chaîne de TonTuyau, leurs fichiers avec.",
   'task.retryDownloads.what': "Retélécharge les vidéos échouées d'une chaîne, l'une après l'autre.",
   'task.addChannel.what': "Ajoute une chaîne et s'y abonne.",
   'task.addChannel.help':
@@ -506,6 +508,7 @@ export const fr: Dictionary = {
   'run.result.youTubeSync':
     '{channels} chaînes listées : {created} nouvelles, {back} fichiers revenus, {failed} non téléchargées',
   'run.result.rebuild': 'Index réécrits',
+  'run.result.purge': { one: '{count} vidéo purgée', other: '{count} vidéos purgées' },
   'run.result.refresh':
     '{found} trouvées ({unlisted} non répertoriées) · {gone} disparues · {private} privées · {failed} à réessayer',
   'run.result.canceled': 'Arrêtée',
@@ -614,6 +617,8 @@ export const fr: Dictionary = {
   'subscription.everything': 'Tout télécharger',
   'subscription.everythingConfirm':
     "Liste en entier les onglets cochés de cette chaîne et télécharge tout ce que TonTuyau n'a pas, fichiers manquants compris : des heures parfois pour une grande chaîne, pendant lesquelles les autres tâches attendent.",
+  'subscription.everythingFormat': 'Format yt-dlp pour ce téléchargement',
+  'subscription.everythingFormatHint': 'Prérempli avec celui de la page YouTube, qui reste tel quel.',
   'subscription.saved': 'Enregistré.',
   'subscription.refused': 'Pas enregistré : {reason}',
   'channelAdmin.videosOnYouTube': 'Ses vidéos sur YouTube',
@@ -632,6 +637,25 @@ export const fr: Dictionary = {
   'channelAdmin.onYouTubeColumn': 'Sur YouTube',
   'channelAdmin.lastCheck': 'Dernière vérification',
   'channelAdmin.actions': 'Actions',
+  'purge.select': 'Sélectionner',
+  'purge.cancel': 'Annuler',
+  'purge.selected': { one: '{count} sélectionnée', other: '{count} sélectionnées' },
+  'purge.selectAll': 'Tout sélectionner (affichées)',
+  'purge.selectOne': 'Sélectionner « {title} »',
+  'purge.selection': 'Purger la sélection',
+  'purge.channel': 'Purger toute la chaîne',
+  'purge.one': 'Purger',
+  'purge.tooMany': 'Au plus {max} à la fois : sélectionnez-en moins, ou purgez toute la chaîne.',
+  'purge.titleOne': 'Purger « {title} » ?',
+  'purge.titleMany': { one: 'Purger {count} vidéo ?', other: 'Purger {count} vidéos ?' },
+  'purge.titleChannel': 'Purger toute la chaîne ?',
+  'purge.channelSize': '{videos}, {size} sur le disque.',
+  'purge.what':
+    'Fichiers, miniatures, commentaires et échecs de téléchargement sont supprimés de TonTuyau. La chaîne et son abonnement restent.',
+  'purge.again':
+    "Rien n'est demandé à YouTube : « Tout télécharger » ou une synchronisation complète les retéléchargera.",
+  'purge.confirm': 'Purger',
+  'purge.asked': 'Purge demandée : elle tourne à son tour.',
   'dashboard.goneHint': 'Vidéos que TonTuyau garde mais qui ne sont plus disponibles sur YouTube',
   'dashboard.playTime': 'Durée totale',
   'dashboard.typeDetail': '{share}, {average} en moyenne',

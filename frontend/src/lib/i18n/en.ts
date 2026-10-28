@@ -386,6 +386,7 @@ export const en = {
   'task.youTubeFullSync': 'Full YouTube sync',
   'task.retryDownloads': 'Try failed downloads again',
   'task.refreshAll': 'Refresh everything',
+  'task.purgeVideos': 'Purge videos',
   'task.import.what': "Adds what's new in TubeArchivist's library.",
   'task.import.help':
     "Reads the whole TubeArchivist library and adds what TonTuyau doesn't have. What it has stays as it is, and nothing is deleted: once imported, TubeArchivist can be shut down.",
@@ -403,6 +404,7 @@ export const en = {
   'task.refreshAll.what': 'Reads every channel and its videos on YouTube again.',
   'task.refreshAll.help':
     'Reads each channel then its videos on YouTube, the least recently read first, at the pace of the refreshes: what TonTuyau read lately is skipped, what is gone never read again.',
+  'task.purgeVideos.what': 'Deletes videos of a channel from TonTuyau, their files with them.',
   'task.retryDownloads.what': "Downloads a channel's failed videos again, one after the other.",
   'task.addChannel.what': 'Adds a channel and subscribes to it.',
   'task.addChannel.help':
@@ -494,6 +496,7 @@ export const en = {
   'run.result.retry': '{created} downloaded, {failed} failed again',
   'run.result.youTubeSync': '{channels} channels listed: {created} new, {back} files back, {failed} not downloaded',
   'run.result.rebuild': 'Indices written again',
+  'run.result.purge': { one: '{count} video purged', other: '{count} videos purged' },
   'run.result.refresh': '{found} found ({unlisted} unlisted) · {gone} gone · {private} private · {failed} to retry',
   'run.result.canceled': 'Stopped',
   'run.result.running': 'Running…',
@@ -602,6 +605,8 @@ export const en = {
   'subscription.everything': 'Download everything',
   'subscription.everythingConfirm':
     'Lists this channel’s ticked tabs whole and downloads all TonTuyau doesn’t have, the files missing included: up to hours for a big channel, during which the other tasks wait.',
+  'subscription.everythingFormat': 'yt-dlp format for this download',
+  'subscription.everythingFormatHint': 'Filled in with the YouTube page’s, which is left as it is.',
   'subscription.saved': 'Saved.',
   'subscription.refused': 'Not saved: {reason}',
   'channelAdmin.statesHint':
@@ -619,6 +624,24 @@ export const en = {
   'channelAdmin.onYouTubeColumn': 'On YouTube',
   'channelAdmin.lastCheck': 'Last check',
   'channelAdmin.actions': 'Actions',
+  'purge.select': 'Select',
+  'purge.cancel': 'Cancel',
+  'purge.selected': { one: '{count} selected', other: '{count} selected' },
+  'purge.selectAll': 'Select all (shown)',
+  'purge.selectOne': 'Select “{title}”',
+  'purge.selection': 'Purge selection',
+  'purge.channel': 'Purge the whole channel',
+  'purge.one': 'Purge',
+  'purge.tooMany': 'At most {max} at a time: select fewer, or purge the whole channel.',
+  'purge.titleOne': 'Purge “{title}”?',
+  'purge.titleMany': { one: 'Purge {count} video?', other: 'Purge {count} videos?' },
+  'purge.titleChannel': 'Purge the whole channel?',
+  'purge.channelSize': '{videos}, {size} on disk.',
+  'purge.what':
+    'Files, thumbnails, comments and failed downloads are deleted from TonTuyau. The channel and its subscription stay.',
+  'purge.again': 'Nothing is asked of YouTube: “Download everything” or a full sync downloads them again.',
+  'purge.confirm': 'Purge',
+  'purge.asked': 'Purge asked for: it runs in its turn.',
   'dashboard.goneHint': 'Videos TonTuyau keeps that are no longer available on YouTube',
   'dashboard.playTime': 'Play time',
   'dashboard.typeDetail': '{share}, {average} on average',

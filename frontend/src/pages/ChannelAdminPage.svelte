@@ -5,10 +5,15 @@
   // latest first, by state (?state=, the chips) or words. While a run goes on (any), a line says which and a refresh
   // asked for waits its turn in the queue (alpha.3: the buttons stay enabled); the page asks again every 3 s then, and
   // shows what changed once it's over. A refusal says why; a 401 ends the session.
+  // 2.2.1: videos purged from TonTuyau (the task purgeVideos), files and all: one from its row, the ones ticked once
+  // Select shows the boxes, or the whole channel; each asked first in a dialog. The purge followed until it's over,
+  // then its result in a line and the list read again.
   import { untrack } from 'svelte'
+  import { SvelteSet } from 'svelte/reactivity'
   import Avatar from '../components/Avatar.svelte'
   import Button from '../components/Button.svelte'
   import Chips from '../components/Chips.svelte'
+  import Dialog from '../components/Dialog.svelte'
   import ErrorState from '../components/ErrorState.svelte'
   import FailedDownloads from '../components/FailedDownloads.svelte'
   import HelpButton from '../components/HelpButton.svelte'
@@ -19,13 +24,14 @@
   import Thumbnail from '../components/Thumbnail.svelte'
   import YouTubeStateBadge from '../components/YouTubeStateBadge.svelte'
   import { api, ApiError } from '../lib/api/client'
-  import type { AdminChannel, AdminVideo, RunTask, Tasks } from '../lib/api/types'
+  import type { AdminChannel, AdminVideo, Run, RunTask, Tasks } from '../lib/api/types'
   import { auth } from '../lib/auth.svelte'
   import { formatAge, formatBytes, formatDate, formatNumber } from '../lib/format'
   import { i18n, t, tp } from '../lib/i18n/i18n.svelte'
   import { Pager, Remote } from '../lib/remote.svelte'
   import { router } from '../lib/router/router.svelte'
   import { href } from '../lib/router/routes'
+  import { runResult } from '../lib/runs'
   import { pageTitle } from '../lib/title.svelte'
   import { youTubeStates } from '../lib/youTubeStates'
 
@@ -34,6 +40,9 @@
   const BUSY_EVERY = 3_000
   const IDLE_EVERY = 30_000
   const SEARCH_AFTER = 300
+  /** A purge names this many videos at most (the API's limit): more, it's the whole channel's. */
+  const MAX_PURGED = 500
+  const FOLLOW_EVERY = 1_000
   const states = youTubeStates
 
   const channel = new Remote<AdminChannel>()
@@ -113,6 +122,89 @@
     }
   }
 
+  // The purge (2.2.1): Select shows a box on each row; what's asked waits in the dialog until confirmed.
+  let selecting = $state(false)
+  const selected = new SvelteSet<string>()
+  let purging = $state<
+    { kind: 'one'; video: AdminVideo['video'] } | { kind: 'selection' } | { kind: 'channel' } | null
+  >(null)
+  let confirming = $state(false)
+  // The purge asked for, as last read: followed until it's over.
+  let purge = $state<Run | null>(null)
+  let alive = true
+  $effect(() => () => (alive = false))
+
+  const shownIds = $derived(videos.items.map((item) => item.video.id))
+  const allShown = $derived(shownIds.length > 0 && shownIds.every((videoId) => selected.has(videoId)))
+
+  function stopSelecting() {
+    selecting = false
+    selected.clear()
+  }
+
+  function toggleAll() {
+    if (allShown) {
+      selected.clear()
+    } else {
+      shownIds.forEach((videoId) => selected.add(videoId))
+    }
+  }
+
+  function askPurge(what: NonNullable<typeof purging>) {
+    purging = what
+    confirming = true
+  }
+
+  async function startPurge() {
+    const what = purging
+    if (!what) {
+      return
+    }
+    refused = null
+    queued = null
+    purge = null
+    pending = true
+    try {
+      const started = await api.startTask('purgeVideos', id, undefined, undefined, undefined, {
+        videos: what.kind === 'one' ? [what.video.id] : what.kind === 'selection' ? [...selected] : undefined,
+      })
+      stopSelecting()
+      void follow(started)
+    } catch (error) {
+      refused = t('task.refused', {
+        reason: error instanceof ApiError ? (error.problem.detail ?? error.problem.title) : String(error),
+      })
+    } finally {
+      pending = false
+      confirming = false
+      await tasks.refresh()
+    }
+  }
+
+  /** Reads the purge again until it's over, then the channel and its videos (from the first page: some are gone). */
+  async function follow(run: Run) {
+    let current = run
+    purge = current
+    while (alive && (current.state === 'queued' || current.state === 'running')) {
+      await new Promise((resolve) => setTimeout(resolve, FOLLOW_EVERY))
+      current = await api.run(run.id).catch(() => current)
+      purge = current
+    }
+    if (alive) {
+      void channel.refresh()
+      videos.retry()
+      runsEnded++
+    }
+  }
+
+  const purgeTitle = $derived(
+    purging?.kind === 'one'
+      ? t('purge.titleOne', { title: purging.video.title })
+      : purging?.kind === 'selection'
+        ? tp('purge.titleMany', selected.size)
+        : t('purge.titleChannel'),
+  )
+
   pageTitle(() => channel.data?.channel.name ?? t('admin.dashboard'))
 
   const number = (count: number) => formatNumber(count, i18n.lang)
@@ -176,6 +268,12 @@
     {/if}
     {#if refused}
       <p class="refused" role="alert">{refused}</p>
+    {/if}
+    {#if purge}
+      <p class="purged" role="status">
+        {purge.state === 'queued' || purge.state === 'running' ? t('purge.asked') : runResult(purge)}
+        <a href={href.adminRun(purge.id)}>{t('task.follow')}</a>
+      </p>
     {/if}
 
     <div class="two">
@@ -282,6 +380,26 @@
         {/if}
       </div>
 
+      {#if selecting}
+        <div class="selection" role="group" aria-label={t('purge.select')}>
+          <span class="picked-count">{tp('purge.selected', selected.size)}</span>
+          {#if selected.size > MAX_PURGED}
+            <small class="too-many">{t('purge.tooMany', { max: MAX_PURGED })}</small>
+          {/if}
+          <span class="selection-actions">
+            <Button
+              variant="primary"
+              disabled={pending || selected.size === 0 || selected.size > MAX_PURGED}
+              onclick={() => askPurge({ kind: 'selection' })}
+            >
+              {t('purge.selection')}
+            </Button>
+            <Button disabled={pending} onclick={() => askPurge({ kind: 'channel' })}>{t('purge.channel')}</Button>
+            <Button onclick={stopSelecting}>{t('purge.cancel')}</Button>
+          </span>
+        </div>
+      {/if}
+
       {#if videos.status === 'loading'}
         <Skeleton layout="page" />
       {:else if videos.status === 'error' && videos.error}
@@ -293,18 +411,41 @@
           <table aria-labelledby="videos-title">
             <thead>
               <tr>
+                {#if selecting}
+                  <th class="pick">
+                    <input type="checkbox" aria-label={t('purge.selectAll')} checked={allShown} onchange={toggleAll} />
+                  </th>
+                {/if}
                 <th>{t('channelAdmin.video')}</th>
                 <th>{t('channelAdmin.type')}</th>
                 <th>{t('channelAdmin.published')}</th>
                 <th>{t('channelAdmin.onYouTubeColumn')}</th>
                 <th>{t('channelAdmin.lastCheck')}</th>
-                <th><span class="visually-hidden">{t('channelAdmin.actions')}</span></th>
+                <!-- Select (2.2.1) over the rows' actions: the boxes, then the selection's bar. -->
+                <th class="head-actions">
+                  {#if selecting}
+                    <span class="visually-hidden">{t('channelAdmin.actions')}</span>
+                  {:else}
+                    <Button onclick={() => (selecting = true)}>{t('purge.select')}</Button>
+                  {/if}
+                </th>
               </tr>
             </thead>
             <tbody>
               {#each videos.items as item (item.video.id)}
                 {@const video = item.video}
-                <tr>
+                <tr class:picked={selecting && selected.has(video.id)}>
+                  {#if selecting}
+                    <td class="pick">
+                      <input
+                        type="checkbox"
+                        aria-label={t('purge.selectOne', { title: video.title })}
+                        checked={selected.has(video.id)}
+                        onchange={(event) =>
+                          event.currentTarget.checked ? selected.add(video.id) : selected.delete(video.id)}
+                      />
+                    </td>
+                  {/if}
                   <td>
                     <a class="video" href={href.watch(video.id)}>
                       <span class="thumb"
@@ -332,6 +473,9 @@
                       >
                         {t('task.refresh')} <span class="visually-hidden">{video.title}</span>
                       </Button>
+                      <Button disabled={pending} onclick={() => askPurge({ kind: 'one', video })}>
+                        {t('purge.one')} <span class="visually-hidden">{video.title}</span>
+                      </Button>
                       {#if item.youTube.state === 'gone'}
                         <small>{t('channelAdmin.goneNotRefreshed')}</small>
                       {/if}
@@ -345,6 +489,23 @@
         <LoadMore pager={videos} />
       {/if}
     </section>
+
+    <Dialog bind:open={confirming} title={purgeTitle}>
+      {#if purging?.kind === 'channel'}
+        <p class="sure">
+          {t('purge.channelSize', {
+            videos: tp('count.videos', total(data)),
+            size: formatBytes(size.videos + size.shorts + size.streams, i18n.lang),
+          })}
+        </p>
+      {/if}
+      <p>{t('purge.what')}</p>
+      <p>{t('purge.again')}</p>
+      {#snippet actions()}
+        <Button variant="primary" disabled={pending} onclick={() => void startPurge()}>{t('purge.confirm')}</Button>
+        <Button onclick={() => (confirming = false)}>{t('purge.cancel')}</Button>
+      {/snippet}
+    </Dialog>
   {/if}
 </div>
 
@@ -414,8 +575,17 @@
     text-underline-offset: var(--underline-offset);
   }
 
-  .queued {
+  .queued,
+  .purged {
     color: var(--color-text-secondary);
+  }
+
+  /* "Follow its log": a link in the sentence, as the running line's. */
+  .purged a {
+    margin-left: var(--space-2);
+    color: var(--color-link);
+    text-decoration: underline;
+    text-underline-offset: var(--underline-offset);
   }
 
   .refused {
@@ -525,6 +695,58 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
+  }
+
+  /* Select (2.2.1): a quiet bar over the table, what's ticked on the left, its actions on the right. */
+  .selection {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2) var(--space-3);
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--color-surface);
+  }
+
+  .picked-count {
+    font-weight: var(--font-weight-medium);
+  }
+
+  .too-many {
+    color: var(--color-error);
+  }
+
+  .selection-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-left: auto;
+  }
+
+  /* Select, against the right edge over the rows' buttons. */
+  th.head-actions {
+    padding-block: var(--space-2);
+    text-align: right;
+  }
+
+  /* The boxes' column: as narrow as a box. */
+  .pick {
+    width: 0;
+    padding-right: 0;
+  }
+
+  .pick input {
+    display: block;
+  }
+
+  /* A ticked row: the selection bar's grey. */
+  tr.picked td {
+    background: var(--color-surface);
+  }
+
+  .sure {
+    color: var(--color-text);
+    font-weight: var(--font-weight-medium);
   }
 
   .videos {

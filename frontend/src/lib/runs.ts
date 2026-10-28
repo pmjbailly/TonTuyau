@@ -1,7 +1,7 @@
 // What the Tasks page shows of a run (1.4), from what the API gave: never a count it didn't send.
 import type { ChannelTabs, Run, RunTask } from './api/types'
 import { formatDateTime, formatNumber } from './format'
-import { i18n, t } from './i18n/i18n.svelte'
+import { i18n, t, tp } from './i18n/i18n.svelte'
 import type { TextKey } from './i18n/types'
 
 /** How long it ran, or has been running (in seconds), at `now`. */
@@ -35,6 +35,7 @@ export const taskCommands: Record<RunTask, string> = {
   youTubeFullSync: 'tontuyau youtube full-sync [<id>]',
   retryDownloads: 'tontuyau youtube retry <id>',
   refreshAll: 'tontuyau youtube refresh-all [days]',
+  purgeVideos: 'tontuyau youtube purge <id>',
 }
 
 /** The tasks whose card says more than its one line, behind its "?" (alpha.4). */
@@ -108,6 +109,9 @@ export function runResult(run: Run): string {
   }
   if (run.task === 'indexRebuild') {
     return t('run.result.rebuild')
+  }
+  if (run.task === 'purgeVideos') {
+    return tp('run.result.purge', counts.purged, n(counts.purged))
   }
   if (run.task === 'retryDownloads') {
     return t('run.result.retry', { created: n(counts.created), failed: n(counts.downloadFailed) })

@@ -30,6 +30,9 @@ public sealed class TaskService(
 
     /// <summary>"Refresh everything" skips what was read in the last days: a year at most.</summary>
     public const int MaxSkipReadDays = 365;
+
+    /// <summary>A purge (2.2.1) names this many videos at most: more, it's the whole channel's.</summary>
+    public const int MaxPurgedVideos = 500;
     public const int MaxRunsPerPage = 100;
     public const int DefaultLogLinesPerPage = 500;
     public const int MaxLogLinesPerPage = 2000;
@@ -117,7 +120,15 @@ public sealed class TaskService(
     /// </exception>
     /// <param name="days">"Refresh everything" (B8): what was read in the last this many days is skipped, 0 to 365; null: 7.</param>
     /// <param name="format">
-    /// A download (2.2, "Try again" with a format): yt-dlp's format this once; null: the YouTube settings' one.
+    /// A download (2.2, "Try again" with a format), a full sync of one channel (2.2.1): yt-dlp's format this once;
+    /// null: the YouTube settings' one.
+    /// </param>
+    /// <param name="retryWithoutCookie">
+    /// A full sync of one channel (2.2.1): a download's format matching none with the YouTube cookie tried again
+    /// without it, this once; null: as the YouTube settings say.
+    /// </param>
+    /// <param name="videos">
+    /// A purge (2.2.1): the videos of the channel to purge, their ids by commas; null: every video of the channel.
     /// </param>
     public async Task<RunView> StartAsync(
         string task,
@@ -126,7 +137,9 @@ public sealed class TaskService(
         string account,
         CancellationToken cancellationToken,
         int? days = null,
-        string? format = null)
+        string? format = null,
+        bool? retryWithoutCookie = null,
+        string? videos = null)
     {
         // An index rebuild starts from the command line only.
         if (!ApiValues.Tasks.TryGet(task, out SyncMode mode) || mode is SyncMode.IndexRebuild)
@@ -134,7 +147,7 @@ public sealed class TaskService(
             throw RequestRules.Invalid(
                 "task",
                 "must be import, refreshVideo, refreshChannel, refreshChannelVideos, downloadVideo, addChannel, "
-                    + "youTubeSync, youTubeFullSync, retryDownloads or refreshAll.");
+                    + "youTubeSync, youTubeFullSync, retryDownloads, refreshAll or purgeVideos.");
         }
 
         bool refresh = mode is SyncMode.RefreshVideo
@@ -143,23 +156,27 @@ public sealed class TaskService(
             or SyncMode.DownloadVideo
             or SyncMode.AddChannel
             or SyncMode.RetryDownloads;
-        if (refresh && target is null)
+        if ((refresh || mode == SyncMode.PurgeVideos) && target is null)
         {
             throw RequestRules.Invalid("target", "is required: the video's or channel's id.");
         }
 
         // The full sync takes one too, optional: "Download everything" of one channel.
-        if (!refresh && mode != SyncMode.YouTubeFullSync && target is not null)
+        if (!refresh && mode is not SyncMode.YouTubeFullSync and not SyncMode.PurgeVideos && target is not null)
         {
             throw RequestRules.Invalid(
                 "target",
-                "is only for the refreshes, the downloads, addChannel and youTubeFullSync.");
+                "is only for the refreshes, the downloads, addChannel, youTubeFullSync and purgeVideos.");
         }
 
-        if (mode == SyncMode.YouTubeFullSync && target is not null && !LibraryIds.IsChannelId(target))
+        if (mode is SyncMode.YouTubeFullSync or SyncMode.PurgeVideos
+            && target is not null
+            && !LibraryIds.IsChannelId(target))
         {
             throw RequestRules.Invalid("target", "must be a YouTube channel's id (UC…).");
         }
+
+        IReadOnlyList<string> purged = VideosOf(mode, videos);
 
         if (mode != SyncMode.AddChannel && tabs is not null)
         {
@@ -172,9 +189,22 @@ public sealed class TaskService(
         }
 
         format = format?.Trim();
-        if (format is not null && mode != SyncMode.DownloadVideo)
+        if (format is not null && mode is not SyncMode.DownloadVideo and not SyncMode.YouTubeFullSync)
         {
-            throw RequestRules.Invalid("format", "is only for downloadVideo.");
+            throw RequestRules.Invalid("format", "is only for downloadVideo and youTubeFullSync.");
+        }
+
+        if (retryWithoutCookie is not null && mode != SyncMode.YouTubeFullSync)
+        {
+            throw RequestRules.Invalid("retryWithoutCookie", "is only for youTubeFullSync.");
+        }
+
+        // "Download everything" of one channel only takes them: the settings this once.
+        if ((format is not null || retryWithoutCookie is not null)
+            && mode == SyncMode.YouTubeFullSync
+            && target is null)
+        {
+            throw RequestRules.Invalid("target", "is required with format or retryWithoutCookie: the channel's id.");
         }
 
         if (format is not null && !YouTubeSettings.IsDownloadFormat(format))
@@ -197,8 +227,16 @@ public sealed class TaskService(
                     .ConfigureAwait(false)
                 : mode is SyncMode.YouTubeSync or SyncMode.YouTubeFullSync
                 ? await runner
-                    .StartYouTubeSyncAsync(mode == SyncMode.YouTubeFullSync, SyncTrigger.Admin, account, target)
+                    .StartYouTubeSyncAsync(
+                        mode == SyncMode.YouTubeFullSync,
+                        SyncTrigger.Admin,
+                        account,
+                        target,
+                        format,
+                        retryWithoutCookie)
                     .ConfigureAwait(false)
+                : mode == SyncMode.PurgeVideos
+                ? await runner.StartPurgeAsync(target!, purged, SyncTrigger.Admin, account).ConfigureAwait(false)
                 : mode == SyncMode.AddChannel
                 ? await runner
                     .StartAddChannelAsync(
@@ -316,6 +354,27 @@ public sealed class TaskService(
 
     /// <returns>Null when none is named: the YouTube settings' default ones (B6).</returns>
     /// <exception cref="ValidationException">Not tabs: <c>videos</c>, <c>shorts</c>, <c>streams</c>, by commas.</exception>
+    /// <summary>A purge's videos (2.2.1): ids by commas, each once, <see cref="MaxPurgedVideos"/> at most.</summary>
+    private static IReadOnlyList<string> VideosOf(SyncMode mode, string? videos)
+    {
+        if (videos is null)
+        {
+            return [];
+        }
+
+        if (mode != SyncMode.PurgeVideos)
+        {
+            throw RequestRules.Invalid("videos", "is only for purgeVideos.");
+        }
+
+        string[] ids = videos.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return ids.Length is > 0 and <= MaxPurgedVideos && ids.All(LibraryIds.IsVideoId)
+            ? [.. ids.Distinct(StringComparer.Ordinal)]
+            : throw RequestRules.Invalid(
+                "videos",
+                $"must be 1 to {MaxPurgedVideos} YouTube video ids by commas; none for the whole channel.");
+    }
+
     private static ChannelTabs? TabsOf(string? tabs) =>
         tabs is null
             ? null

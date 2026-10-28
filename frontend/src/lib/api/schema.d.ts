@@ -2817,14 +2817,18 @@ export interface paths {
     post: {
       parameters: {
         query?: {
-          /** @description Refreshes, downloadVideo, addChannel, youTubeFullSync: the video's or channel's id, or a link. */
+          /** @description Refreshes, downloadVideo, addChannel, youTubeFullSync, purgeVideos: the video or channel id. */
           target?: string
           /** @description addChannel only: videos,shorts,streams or some of them (default: the three). */
           tabs?: string
           /** @description refreshAll only: skip what was read in the last this many days, 0 to 365 (7). */
           days?: number
-          /** @description downloadVideo only: yt-dlp's format this once (default: the YouTube settings' one). */
+          /** @description downloadVideo, youTubeFullSync of a channel: yt-dlp's format this once. */
           format?: string
+          /** @description youTubeFullSync of a channel: a format matching none retried without the cookie. */
+          retryWithoutCookie?: boolean
+          /** @description purgeVideos only: the videos to purge, ids by commas, 500 at most (default: all). */
+          videos?: string
         }
         header?: never
         path: {
@@ -4028,6 +4032,8 @@ export interface components {
       commentsRead: number
       /** Format: int32 */
       subscribed: number
+      /** Format: int32 */
+      purged: number
     }
     RunLock: {
       task: components['schemas']['SyncMode']
@@ -4130,6 +4136,7 @@ export interface components {
       | 'youTubeFullSync'
       | 'retryDownloads'
       | 'refreshAll'
+      | 'purgeVideos'
     /** @enum {string} */
     SyncOutcome: 'running' | 'succeeded' | 'failed' | 'canceled' | 'onHold' | 'queued'
     /** @enum {string} */

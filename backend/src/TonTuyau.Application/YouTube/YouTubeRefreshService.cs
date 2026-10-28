@@ -148,6 +148,8 @@ public sealed partial class YouTubeRefreshService(
             : mode == SyncMode.RetryDownloads
             ? [.. (await downloadFailures.ListAsync(target!, cancellationToken).ConfigureAwait(false))
                 .Select(f => f.VideoId)]
+            : mode == SyncMode.PurgeVideos
+            ? await PurgeWorkAsync(target!, queued?.Videos ?? [], cancellationToken).ConfigureAwait(false)
             : [target!];
         List<VideoSummary> skipped = [];
         if (mode == SyncMode.RefreshChannelVideos)
@@ -471,6 +473,7 @@ public sealed partial class YouTubeRefreshService(
         CancellationToken ct = context.CancellationToken;
         int videosTotal = context.Run.Counts.VideosRead + work.Count(LibraryIds.IsVideoId);
         bool videosBegun = false;
+        long freed = 0;
         for (int index = 0; index < work.Count; index++)
         {
             // Its counts as before it: an item stopped by a hold is read again when the run resumes.
@@ -494,6 +497,17 @@ public sealed partial class YouTubeRefreshService(
                 {
                     refused = await SyncItemAsync(mode == SyncMode.YouTubeFullSync, work, index, read, context)
                         .ConfigureAwait(false);
+                }
+                else if (mode == SyncMode.PurgeVideos)
+                {
+                    if (index == 0)
+                    {
+                        context.BeginPhase(SyncPhase.Purge, work.Count);
+                    }
+
+                    freed += await PurgeOneAsync(id, context).ConfigureAwait(false);
+                    refused = null;
+                    context.Progressed(index + 1);
                 }
                 else if (mode == SyncMode.RefreshAll)
                 {
@@ -560,6 +574,11 @@ public sealed partial class YouTubeRefreshService(
             await context.SaveAsync().ConfigureAwait(false);
         }
 
+        if (mode == SyncMode.PurgeVideos)
+        {
+            NotePurged(freed, context);
+        }
+
         return true;
     }
 
@@ -616,6 +635,17 @@ public sealed partial class YouTubeRefreshService(
     /// <exception cref="SyncRefusedException">Why it can't run.</exception>
     public async Task CheckAsync(SyncMode mode, string target, CancellationToken cancellationToken)
     {
+        if (mode == SyncMode.PurgeVideos)
+        {
+            if (!LibraryIds.IsChannelId(target)
+                || await channels.GetAsync(target, cancellationToken).ConfigureAwait(false) is null)
+            {
+                throw new SyncRefusedException($"No channel {target} in the library.");
+            }
+
+            return;
+        }
+
         // The downloads (2.2.0): under the disk space threshold, set to wait, none starts.
         if (mode is SyncMode.DownloadVideo
                 or SyncMode.YouTubeSync
@@ -1028,13 +1058,14 @@ public sealed partial class YouTubeRefreshService(
     {
         CancellationToken ct = context.CancellationToken;
         string folder = media.NewDownloadFolder(videoId);
-        // "Try again" with a format (2.2): the run's, this once.
+        // "Try again" with a format (2.2), "Download everything" with its settings (2.2.1): the run's, this once.
         string format = context.Run.DownloadFormat ?? read.DownloadFormat;
+        bool withoutCookie = context.Run.RetryWithoutCookie ?? read.RetryWithoutCookie;
         try
         {
             LogDownloading(videoId, format);
             YouTubeLookup<YouTubeDownload> lookup = await youTube
-                .DownloadVideoAsync(videoId, format, folder, read.RetryWithoutCookie, ct)
+                .DownloadVideoAsync(videoId, format, folder, withoutCookie, ct)
                 .ConfigureAwait(false);
             if (lookup.Answer == YouTubeAnswer.Refused)
             {

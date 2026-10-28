@@ -247,31 +247,137 @@ describe('ChannelAdminPage', () => {
     await vi.waitFor(() => expect(method).toBe('DELETE'))
   })
 
-  it('downloads everything of a subscribed channel, asked first, then opens its run', async () => {
+  const subscribed = () =>
+    channel({
+      subscription: {
+        tabs: { videos: true, shorts: false, streams: false },
+        since: '2026-10-20T09:00:00Z',
+        by: 'claire',
+        origin: 'tonTuyau',
+      },
+    })
+
+  it('downloads everything of a subscribed channel, asked first in a dialog, then opens its run', async () => {
     const user = userEvent.setup()
     const started = run({ id: 'run-20261020T190000Z-eeeeee', task: 'youTubeFullSync', state: 'queued' })
     const api = routes({
-      [base]: channel({
-        subscription: {
-          tabs: { videos: true, shorts: false, streams: false },
-          since: '2026-10-20T09:00:00Z',
-          by: 'claire',
-          origin: 'tonTuyau',
-        },
-      }),
+      [base]: subscribed(),
+      '/api/admin/youtube/settings': { downloadFormat: 'bestvideo+bestaudio', retryWithoutCookie: true },
       '/api/admin/tasks/youTubeFullSync/runs': started,
     })
     render(ChannelAdminPage, { id })
 
     const box = await screen.findByRole('region', { name: 'Subscription' })
     await user.click(within(box).getByRole('button', { name: 'Download everything' }))
-    const confirm = within(box).getByRole('group', { name: 'Download everything' })
-    expect(confirm).toHaveTextContent(/up to hours for a big channel/)
+    const dialog = await screen.findByRole('dialog', { name: 'Download everything' })
+    expect(dialog).toHaveTextContent(/up to hours for a big channel/)
+    // Filled in with the YouTube page's settings.
+    const field = within(dialog).getByRole('textbox', { name: 'yt-dlp format for this download' })
+    await vi.waitFor(() => expect(field).toHaveValue('bestvideo+bestaudio'))
+    expect(within(dialog).getByRole('checkbox', { name: /try again without it/ })).toBeChecked()
     expect(api.requests('/api/admin/tasks/youTubeFullSync/runs')).toEqual([])
 
-    await user.click(within(confirm).getByRole('button', { name: 'Download everything' }))
+    // Left as they are: nothing more is asked than the channel.
+    await user.click(within(dialog).getByRole('button', { name: 'Download everything' }))
     await vi.waitFor(() => expect(location.pathname).toBe(`/admin/runs/${started.id}`))
-    expect(api.requests('/api/admin/tasks/youTubeFullSync/runs')[0]?.searchParams.get('target')).toBe(id)
+    const sent = api.requests('/api/admin/tasks/youTubeFullSync/runs')[0]?.searchParams
+    expect(sent?.get('target')).toBe(id)
+    expect(sent?.has('format')).toBe(false)
+    expect(sent?.has('retryWithoutCookie')).toBe(false)
+  })
+
+  it('downloads everything with another format and without the retry without the cookie, this once (2.2.1)', async () => {
+    const user = userEvent.setup()
+    const started = run({ id: 'run-20261020T190000Z-dddddd', task: 'youTubeFullSync', state: 'queued' })
+    const api = routes({
+      [base]: subscribed(),
+      '/api/admin/youtube/settings': { downloadFormat: 'bestvideo+bestaudio', retryWithoutCookie: true },
+      '/api/admin/tasks/youTubeFullSync/runs': started,
+    })
+    render(ChannelAdminPage, { id })
+
+    const box = await screen.findByRole('region', { name: 'Subscription' })
+    await user.click(within(box).getByRole('button', { name: 'Download everything' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Download everything' })
+    const field = within(dialog).getByRole('textbox', { name: 'yt-dlp format for this download' })
+    await vi.waitFor(() => expect(field).toHaveValue('bestvideo+bestaudio'))
+    await user.clear(field)
+    await user.type(field, ' 398+251 ')
+    await user.click(within(dialog).getByRole('checkbox', { name: /try again without it/ }))
+
+    await user.click(within(dialog).getByRole('button', { name: 'Download everything' }))
+    await vi.waitFor(() => expect(api.requests('/api/admin/tasks/youTubeFullSync/runs')).toHaveLength(1))
+    const sent = api.requests('/api/admin/tasks/youTubeFullSync/runs')[0]?.searchParams
+    expect(sent?.get('format')).toBe('398+251')
+    expect(sent?.get('retryWithoutCookie')).toBe('false')
+  })
+
+  it('purges one video from its row, asked first, then reads the list again (2.2.1)', async () => {
+    const user = userEvent.setup()
+    const purged = run({
+      id: 'run-20261020T210000Z-pppppp',
+      task: 'purgeVideos',
+      state: 'succeeded',
+      counts: { ...run().counts, purged: 1 },
+    })
+    const api = routes({ '/api/admin/tasks/purgeVideos/runs': purged })
+    render(ChannelAdminPage, { id })
+
+    const table = await screen.findByRole('table')
+    const first = within(table).getAllByRole('row')[1] as HTMLElement
+    await user.click(within(first).getByRole('button', { name: 'Purge Crème brûlée' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Purge “Crème brûlée”?' })
+    expect(dialog).toHaveTextContent('Files, thumbnails, comments and failed downloads are deleted from TonTuyau.')
+    expect(dialog).toHaveTextContent('“Download everything” or a full sync downloads them again.')
+    expect(api.requests('/api/admin/tasks/purgeVideos/runs')).toEqual([])
+
+    await user.click(within(dialog).getByRole('button', { name: 'Purge' }))
+    await vi.waitFor(() => expect(api.requests('/api/admin/tasks/purgeVideos/runs')).toHaveLength(1))
+    const sent = api.requests('/api/admin/tasks/purgeVideos/runs')[0]?.searchParams
+    expect(sent?.get('target')).toBe(id)
+    expect(sent?.get('videos')).toBe('never000001')
+    expect(await screen.findByText('1 video purged')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Follow its log' })).toHaveAttribute('href', `/admin/runs/${purged.id}`)
+    await vi.waitFor(() => expect(api.requests(`${base}/videos`).length).toBeGreaterThan(1))
+  })
+
+  it('selects videos to purge them together, or purges the whole channel (2.2.1)', async () => {
+    const user = userEvent.setup()
+    const purged = run({ id: 'run-20261020T210000Z-qqqqqq', task: 'purgeVideos', state: 'succeeded' })
+    const api = routes({ '/api/admin/tasks/purgeVideos/runs': purged })
+    render(ChannelAdminPage, { id })
+
+    const table = await screen.findByRole('table')
+    expect(within(table).queryByRole('checkbox')).toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    const bar = screen.getByRole('group', { name: 'Select' })
+    expect(bar).toHaveTextContent('0 selected')
+    expect(within(bar).getByRole('button', { name: 'Purge selection' })).toBeDisabled()
+
+    await user.click(within(table).getByRole('checkbox', { name: 'Select “Le poulet rôti”' }))
+    expect(bar).toHaveTextContent('1 selected')
+    await user.click(within(table).getByRole('checkbox', { name: 'Select all (shown)' }))
+    expect(bar).toHaveTextContent('2 selected')
+    await user.click(within(table).getByRole('checkbox', { name: 'Select “Crème brûlée”' }))
+    await user.click(within(bar).getByRole('button', { name: 'Purge selection' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Purge 1 video?' })
+    await user.click(within(dialog).getByRole('button', { name: 'Purge' }))
+    await vi.waitFor(() => expect(api.requests('/api/admin/tasks/purgeVideos/runs')).toHaveLength(1))
+    expect(api.requests('/api/admin/tasks/purgeVideos/runs')[0]?.searchParams.get('videos')).toBe('gone0000001')
+    // Asked: the boxes go.
+    await vi.waitFor(() => expect(screen.queryByRole('group', { name: 'Select' })).toBeNull())
+
+    await user.click(screen.getByRole('button', { name: 'Select' }))
+    await user.click(
+      within(screen.getByRole('group', { name: 'Select' })).getByRole('button', { name: 'Purge the whole channel' }),
+    )
+    const whole = await screen.findByRole('dialog', { name: 'Purge the whole channel?' })
+    expect(whole).toHaveTextContent('142 videos, 127.8 GB on disk.')
+    await user.click(within(whole).getByRole('button', { name: 'Purge' }))
+    await vi.waitFor(() => expect(api.requests('/api/admin/tasks/purgeVideos/runs')).toHaveLength(2))
+    const sent = api.requests('/api/admin/tasks/purgeVideos/runs')[1]?.searchParams
+    expect(sent?.get('target')).toBe(id)
+    expect(sent?.has('videos')).toBe(false)
   })
 
   it('lists the failed downloads with why, and tries one or all of them again', async () => {

@@ -73,6 +73,14 @@ internal sealed class LibraryVideoRepository(VideoStore store, VideoIndex index)
     public Task<IReadOnlyList<VideoFileState>> ListFilesAsync(CancellationToken cancellationToken) =>
         store.ListFilesAsync(cancellationToken);
 
+    public async Task<int> DeleteAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken)
+    {
+        int deleted = await store.DeleteAsync(ids, cancellationToken).ConfigureAwait(false);
+        // PostgreSQL doesn't have them any more: they leave the index.
+        await ReindexAsync(ids, cancellationToken).ConfigureAwait(false);
+        return deleted;
+    }
+
     public async Task SetMediaMissingAsync(
         IReadOnlyCollection<string> ids,
         bool missing,

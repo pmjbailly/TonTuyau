@@ -128,6 +128,13 @@ public sealed partial class SyncRunner(
     /// <param name="channelId">
     /// The full sync of this channel alone ("Download everything" on its page); null: of every subscribed channel.
     /// </param>
+    /// <param name="downloadFormat">
+    /// The full sync of one channel (2.2.1): yt-dlp's format this once; null: the YouTube settings' one.
+    /// </param>
+    /// <param name="retryWithoutCookie">
+    /// The full sync of one channel (2.2.1): a format matching none with the cookie tried again without it, this once;
+    /// null: as the YouTube settings say.
+    /// </param>
     /// <exception cref="SyncRefusedException">
     /// TonTuyau isn't subscribed to that channel; or the disk space is under the threshold, set to wait (2.2.0).
     /// </exception>
@@ -136,7 +143,9 @@ public sealed partial class SyncRunner(
         bool full,
         SyncTrigger trigger,
         string? startedBy = null,
-        string? channelId = null)
+        string? channelId = null,
+        string? downloadFormat = null,
+        bool? retryWithoutCookie = null)
     {
         SyncMode mode = full ? SyncMode.YouTubeFullSync : SyncMode.YouTubeSync;
         if (channelId is not null && !full)
@@ -144,9 +153,41 @@ public sealed partial class SyncRunner(
             throw new ArgumentException("Only the full sync is of one channel.", nameof(channelId));
         }
 
+        if ((downloadFormat is not null || retryWithoutCookie is not null) && channelId is null)
+        {
+            throw new ArgumentException("Only a full sync of one channel takes its settings.", nameof(channelId));
+        }
+
         await refresh.CheckAsync(mode, channelId ?? "", CancellationToken.None).ConfigureAwait(false);
 
-        return await QueueAsync(mode, channelId, trigger, startedBy).ConfigureAwait(false);
+        return await QueueAsync(
+            mode,
+            channelId,
+            trigger,
+            startedBy,
+            downloadFormat: downloadFormat,
+            retryWithoutCookie: retryWithoutCookie)
+            .ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Asks for a purge (2.2.1): videos of one channel deleted from TonTuyau, their files, thumbnails, comments and
+    /// failures with them; nothing asked of YouTube. A later full sync downloads them again.
+    /// </summary>
+    /// <param name="channelId">The channel's YouTube id.</param>
+    /// <param name="videos">Its videos to purge; none: every one of them.</param>
+    /// <param name="startedBy">The account starting it from the admin pages; null otherwise.</param>
+    /// <exception cref="SyncRefusedException">Not a channel of the library.</exception>
+    /// <exception cref="OperationCanceledException">The backend is stopping.</exception>
+    public async Task<StartedRun> StartPurgeAsync(
+        string channelId,
+        IReadOnlyList<string> videos,
+        SyncTrigger trigger,
+        string? startedBy = null)
+    {
+        await refresh.CheckAsync(SyncMode.PurgeVideos, channelId, CancellationToken.None).ConfigureAwait(false);
+        return await QueueAsync(SyncMode.PurgeVideos, channelId, trigger, startedBy, videos: videos)
+            .ConfigureAwait(false);
     }
 
     /// <summary>
@@ -251,7 +292,9 @@ public sealed partial class SyncRunner(
         string? startedBy,
         ChannelTabs? tabs = null,
         int? skipReadDays = null,
-        string? downloadFormat = null)
+        string? downloadFormat = null,
+        bool? retryWithoutCookie = null,
+        IReadOnlyList<string>? videos = null)
     {
         TaskCompletionSource<SyncRun> finished = new(TaskCreationOptions.RunContinuationsAsynchronously);
         DateTimeOffset now = clock.GetUtcNow();
@@ -267,6 +310,8 @@ public sealed partial class SyncRunner(
             Tabs = tabs,
             SkipReadDays = skipReadDays,
             DownloadFormat = downloadFormat,
+            RetryWithoutCookie = retryWithoutCookie,
+            Videos = videos ?? [],
             Outcome = SyncOutcome.Queued,
         };
         lock (_gate)

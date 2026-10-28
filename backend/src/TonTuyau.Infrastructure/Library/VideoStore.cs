@@ -130,6 +130,21 @@ internal sealed class VideoStore(IServiceScopeFactory scopes) : IVideoStore
             .ConfigureAwait(false);
     }
 
+    public async Task<int> DeleteAsync(IReadOnlyCollection<string> ids, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(ids);
+        int deleted = 0;
+        foreach (string[] batch in Batches(ids))
+        {
+            deleted += await WithContextAsync(db => db.Videos
+                .Where(v => batch.Contains(v.Id))
+                .ExecuteDeleteAsync(cancellationToken))
+                .ConfigureAwait(false);
+        }
+
+        return deleted;
+    }
+
     public async Task SetMediaMissingAsync(
         IReadOnlyCollection<string> ids,
         bool missing,
